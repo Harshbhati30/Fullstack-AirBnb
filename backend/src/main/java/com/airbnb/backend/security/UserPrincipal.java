@@ -66,7 +66,7 @@ public class UserPrincipal implements UserDetails, OAuth2User {
 
     @Override
     public boolean isAccountNonLocked() {
-        return isActive;
+        return true;
     }
 
     @Override
@@ -88,5 +88,9 @@ public class UserPrincipal implements UserDetails, OAuth2User {
     @Override
     public Map<String, Object> getAttributes() {
         return attributes;
+    }
+
+    public boolean hasRole(String role) {
+        return authorities.stream().anyMatch(a -> a.getAuthority().equals(role));
     }
 }

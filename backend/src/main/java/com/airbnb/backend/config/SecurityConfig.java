@@ -24,23 +24,14 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-
+import com.airbnb.backend.security.CustomAccessDeniedHandler;
+import java.util.Arrays;
 import java.util.List;
 
-/**
- * Master security configuration.
- *
- * Defines:
- * - Which endpoints are public vs protected
- * - JWT filter placement in the filter chain
- * - CORS configuration
- * - Session management (stateless — no server-side sessions)
- * - OAuth2 login configuration
- * - Authentication provider setup
- */
+
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity  // enables @PreAuthorize on controller methods
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -50,6 +41,7 @@ public class SecurityConfig {
     private final OAuth2UserService oAuth2UserService;
     private final OAuth2AuthenticationSuccessHandler oAuth2SuccessHandler;
     private final PasswordEncoder passwordEncoder;
+    private final CustomAccessDeniedHandler accessDeniedHandler;
 
     @Value("${app.cors.allowed-origins}")
     private String allowedOrigins;
@@ -65,8 +57,9 @@ public class SecurityConfig {
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
-                .exceptionHandling(ex ->
-                        ex.authenticationEntryPoint(authenticationEntryPoint))
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler))
 
 
                 .authorizeHttpRequests(auth -> auth
@@ -75,9 +68,13 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/auth/**",
                                 "/oauth2/**",
-                                "/images/**"
+                                "/login/oauth2/**",
+                                "/images/**",
+                                "/error"
                         ).permitAll()
 
+                        .requestMatchers("/properties/host/**")
+                        .hasAnyAuthority("ROLE_HOST", "ROLE_ADMIN")
 
                         .requestMatchers(HttpMethod.GET,
                                 "/properties/**",
@@ -92,7 +89,6 @@ public class SecurityConfig {
                         .requestMatchers("/host/**")
                         .hasAnyAuthority("ROLE_HOST", "ROLE_ADMIN")
 
-                        // Everything else requires authentication
                         .anyRequest().authenticated()
                 )
 
@@ -132,7 +128,11 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(List.of(allowedOrigins));
+        List<String> origins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+        config.setAllowedOrigins(origins);
         config.setAllowedMethods(List.of("GET","POST","PUT","DELETE","PATCH","OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setAllowCredentials(true);

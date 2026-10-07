@@ -17,6 +17,10 @@ import java.util.stream.Collectors;
 @Slf4j
 public class JwtTokenProvider {
 
+    private static final String TYPE_CLAIM = "type";
+    private static final String TYPE_ACCESS = "access";
+    private static final String TYPE_REFRESH = "refresh";
+
     @Value("${app.jwt.secret}")
     private String jwtSecret;
 
@@ -26,72 +30,48 @@ public class JwtTokenProvider {
     @Value("${app.jwt.refresh-token-expiration}")
     private long refreshTokenExpiration;
 
-
     private SecretKey getSigningKey() {
         byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
-
-    private String buildToken(String subject,
-                              String email,
-                              String roles,
-                              long expirationMs) {
-        Date now        = new Date();
+    private String buildToken(String subject, String email, String roles,
+                              String type, long expirationMs) {
+        Date now = new Date();
         Date expiryDate = new Date(now.getTime() + expirationMs);
 
         JwtBuilder builder = Jwts.builder()
                 .subject(subject)
                 .issuedAt(now)
                 .expiration(expiryDate)
+                .claim(TYPE_CLAIM, type)
                 .signWith(getSigningKey());
 
         if (email != null) builder.claim("email", email);
-        if (roles  != null) builder.claim("roles", roles);
+        if (roles != null) builder.claim("roles", roles);
 
         return builder.compact();
     }
 
-
     public String generateAccessToken(Authentication authentication) {
-        UserPrincipal userPrincipal =
-                (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
 
         String roles = authentication.getAuthorities()
                 .stream()
                 .map(GrantedAuthority::getAuthority)
                 .collect(Collectors.joining(","));
 
-        return buildToken(
-                userPrincipal.getId().toString(),
-                userPrincipal.getEmail(),
-                roles,
-                accessTokenExpiration
-        );
+        return buildToken(userPrincipal.getId().toString(), userPrincipal.getEmail(),
+                roles, TYPE_ACCESS, accessTokenExpiration);
     }
 
-
-    public String generateAccessTokenFromUserId(Long userId,
-                                                String email,
-                                                String roles) {
-        return buildToken(
-                userId.toString(),
-                email,
-                roles,
-                accessTokenExpiration
-        );
+    public String generateAccessTokenFromUserId(Long userId, String email, String roles) {
+        return buildToken(userId.toString(), email, roles, TYPE_ACCESS, accessTokenExpiration);
     }
-
 
     public String generateRefreshToken(Long userId) {
-        return buildToken(
-                userId.toString(),
-                null,
-                null,
-                refreshTokenExpiration
-        );
+        return buildToken(userId.toString(), null, null, TYPE_REFRESH, refreshTokenExpiration);
     }
-
 
     public Long getUserIdFromToken(String token) {
         return Long.parseLong(parseClaims(token).getSubject());
@@ -105,24 +85,26 @@ public class JwtTokenProvider {
         return parseClaims(token).get("roles", String.class);
     }
 
+    public boolean isAccessToken(String token) {
+        return TYPE_ACCESS.equals(parseClaims(token).get(TYPE_CLAIM, String.class));
+    }
+
+    public boolean isRefreshToken(String token) {
+        return TYPE_REFRESH.equals(parseClaims(token).get(TYPE_CLAIM, String.class));
+    }
+
     public boolean validateToken(String token) {
         try {
             parseClaims(token);
             return true;
         } catch (ExpiredJwtException e) {
             log.warn("JWT expired: {}", e.getMessage());
-        } catch (UnsupportedJwtException e) {
-            log.warn("JWT unsupported: {}", e.getMessage());
-        } catch (MalformedJwtException e) {
-            log.warn("JWT malformed: {}", e.getMessage());
-        } catch (SecurityException e) {
-            log.warn("JWT signature invalid: {}", e.getMessage());
-        } catch (IllegalArgumentException e) {
-            log.warn("JWT empty or null: {}", e.getMessage());
+        } catch (JwtException | IllegalArgumentException e) {
+            // covers unsupported, malformed, bad signature and empty tokens
+            log.warn("JWT invalid: {}", e.getMessage());
         }
         return false;
     }
-
 
     private Claims parseClaims(String token) {
         return Jwts.parser()

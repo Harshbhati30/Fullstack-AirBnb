@@ -10,10 +10,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.oauth2.client.userinfo.DefaultOAuth2UserService;
 import org.springframework.security.oauth2.client.userinfo.OAuth2UserRequest;
 import org.springframework.security.oauth2.core.OAuth2AuthenticationException;
+import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
@@ -30,20 +33,23 @@ public class OAuth2UserService extends DefaultOAuth2UserService {
     public OAuth2User loadUser(OAuth2UserRequest userRequest)
             throws OAuth2AuthenticationException {
 
-
         OAuth2User oAuth2User = super.loadUser(userRequest);
         Map<String, Object> attributes = oAuth2User.getAttributes();
 
-
-        String providerId = (String) attributes.get("sub"); // Google's unique user ID
-        String email     = (String) attributes.get("email");
+        String providerId = (String) attributes.get("sub");
+        String email = (String) attributes.get("email");
         String firstName = (String) attributes.get("given_name");
-        String lastName  = (String) attributes.get("family_name");
-
+        String lastName = (String) attributes.get("family_name");
+        if (firstName == null) firstName = "";
         if (lastName == null) lastName = "";
 
-        log.info("OAuth2 login attempt for email: {}", email);
+        // Never link/create accounts from an unverified email address
+        if (!Boolean.TRUE.equals(attributes.get("email_verified"))) {
+            throw new OAuth2AuthenticationException(
+                    new OAuth2Error("email_not_verified"), "Google email is not verified");
+        }
 
+        log.info("OAuth2 login attempt for email: {}", email);
 
         User user = userRepository.findByEmail(email).orElse(null);
 
@@ -51,10 +57,17 @@ public class OAuth2UserService extends DefaultOAuth2UserService {
             user = registerOAuth2User(email, firstName, lastName, providerId);
             log.info("New OAuth2 user registered: {}", email);
         } else {
+            if (!Boolean.TRUE.equals(user.getIsActive())) {
+                throw new OAuth2AuthenticationException(
+                        new OAuth2Error("account_disabled"), "Account is deactivated");
+            }
             user.setProviderId(providerId);
-            user.setProvider("GOOGLE");
-            if (user.getFirstName() == null) user.setFirstName(firstName);
-            if (user.getLastName() == null) user.setLastName(lastName);
+            if (user.getPassword() == null) {
+                user.setProvider("GOOGLE");
+            }
+            if (!StringUtils.hasText(user.getFirstName())) user.setFirstName(firstName);
+            if (!StringUtils.hasText(user.getLastName())) user.setLastName(lastName);
+            user.setIsEmailVerified(true);
             userRepository.save(user);
             log.info("Existing OAuth2 user logged in: {}", email);
         }
@@ -68,6 +81,9 @@ public class OAuth2UserService extends DefaultOAuth2UserService {
                 .orElseThrow(() -> new RuntimeException(
                         "Default role not found. Make sure DataInitializer ran."));
 
+        Set<Role> roles = new HashSet<>();   // mutable (Set.of would block adding ROLE_HOST later)
+        roles.add(userRole);
+
         User newUser = User.builder()
                 .email(email)
                 .firstName(firstName)
@@ -75,8 +91,8 @@ public class OAuth2UserService extends DefaultOAuth2UserService {
                 .provider("GOOGLE")
                 .providerId(providerId)
                 .isActive(true)
-                .isEmailVerified(true) // Google already verified the email
-                .roles(Set.of(userRole))
+                .isEmailVerified(true)
+                .roles(roles)
                 .build();
 
         return userRepository.save(newUser);

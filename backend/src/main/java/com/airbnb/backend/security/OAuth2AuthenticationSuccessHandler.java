@@ -25,7 +25,7 @@ public class OAuth2AuthenticationSuccessHandler
     private final JwtTokenProvider jwtTokenProvider;
     private final UserRepository userRepository;
 
-    @Value("${app.cors.allowed-origins}")
+    @Value("${app.frontend-url}")
     private String frontendUrl;
 
     @Override
@@ -37,8 +37,7 @@ public class OAuth2AuthenticationSuccessHandler
         UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
 
 
-        User user = userRepository.findByEmail(userPrincipal.getEmail())
-                .orElseThrow();
+        User user = userRepository.findById(userPrincipal.getId()).orElseThrow();
 
         String roles = authentication.getAuthorities()
                 .stream()
