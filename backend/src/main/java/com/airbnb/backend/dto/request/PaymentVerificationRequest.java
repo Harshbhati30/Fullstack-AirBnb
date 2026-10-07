@@ -1,6 +1,7 @@
 package com.airbnb.backend.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 
@@ -16,6 +17,6 @@ public class PaymentVerificationRequest {
     @NotBlank(message = "Razorpay signature is required")
     private String razorpaySignature;
 
-    @NotBlank(message = "Booking ID is required")
+    @NotNull(message = "Booking ID is required")
     private Long bookingId;
 }

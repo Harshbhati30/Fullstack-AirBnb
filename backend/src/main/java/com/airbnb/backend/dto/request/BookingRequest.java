@@ -1,6 +1,7 @@
 package com.airbnb.backend.dto.request;
 
 import jakarta.validation.constraints.Future;
+import jakarta.validation.constraints.FutureOrPresent;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -14,7 +15,7 @@ public class BookingRequest {
     private Long propertyId;
 
     @NotNull(message = "Check-in date is required")
-    @Future(message = "Check-in date must be in the future")
+    @FutureOrPresent(message = "Check-in date must be in the future")
     private LocalDate checkInDate;
 
     @NotNull(message = "Check-out date is required")
