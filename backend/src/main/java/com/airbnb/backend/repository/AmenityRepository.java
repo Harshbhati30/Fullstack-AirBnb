@@ -12,4 +12,6 @@ public interface AmenityRepository extends JpaRepository<Amenity, Long> {
 
     Optional<Amenity> findByNameIgnoreCase(String name);
     List<Amenity> findByIdIn(List<Long> ids);
+
+    List<Amenity> findAllByOrderByNameAsc();
 }

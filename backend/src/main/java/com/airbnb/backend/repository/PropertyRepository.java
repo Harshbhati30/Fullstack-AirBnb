@@ -8,12 +8,22 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import com.airbnb.backend.enums.BookingStatus;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
+import java.time.LocalDate;
+import java.util.Collection;
+import java.util.Optional;
 
 import java.util.List;
 
 @Repository
 public interface PropertyRepository extends JpaRepository<Property, Long>,
         JpaSpecificationExecutor<Property> {
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Property p WHERE p.id = :id")
+    Optional<Property> findByIdForUpdate(@Param("id") Long id);
 
     Page<Property> findByHostIdAndIsActiveTrue(Long hostId, Pageable pageable);
 
@@ -35,12 +45,13 @@ public interface PropertyRepository extends JpaRepository<Property, Long>,
 
     @Query("SELECT COUNT(b) > 0 FROM Booking b " +
             "WHERE b.property.id = :propertyId " +
-            "AND b.status IN ('CONFIRMED', 'PENDING') " +
+            "AND b.status IN :statuses " +
             "AND b.checkInDate < :checkOut " +
             "AND b.checkOutDate > :checkIn")
     boolean isPropertyBooked(
             @Param("propertyId") Long propertyId,
-            @Param("checkIn") java.time.LocalDate checkIn,
-            @Param("checkOut") java.time.LocalDate checkOut
+            @Param("checkIn") LocalDate checkIn,
+            @Param("checkOut") LocalDate checkOut,
+            @Param("statuses") Collection<BookingStatus> statuses
     );
 }

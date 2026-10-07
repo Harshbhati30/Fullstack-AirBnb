@@ -30,9 +30,9 @@ public class PropertyResponse {
     private Integer totalReviews;
     private Boolean isActive;
 
-    // Nested response objects — not flat IDs
+
     private AddressResponse address;
-    private UserResponse host;
+    private PublicUserResponse host;
     private List<PropertyImageResponse> images;
     private Set<AmenityResponse> amenities;
 
