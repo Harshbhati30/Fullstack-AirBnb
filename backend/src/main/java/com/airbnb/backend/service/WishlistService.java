@@ -2,12 +2,17 @@ package com.airbnb.backend.service;
 
 import com.airbnb.backend.dto.response.PagedResponse;
 import com.airbnb.backend.dto.response.PropertyResponse;
-import com.airbnb.backend.entity.*;
-import com.airbnb.backend.exception.BadRequestException;
+import com.airbnb.backend.entity.Property;
+import com.airbnb.backend.entity.User;
+import com.airbnb.backend.entity.Wishlist;
 import com.airbnb.backend.exception.ResourceNotFoundException;
-import com.airbnb.backend.repository.*;
+import com.airbnb.backend.repository.PropertyRepository;
+import com.airbnb.backend.repository.UserRepository;
+import com.airbnb.backend.repository.WishlistRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.*;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +21,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class WishlistService {
 
     private final WishlistRepository wishlistRepository;
@@ -23,38 +29,30 @@ public class WishlistService {
     private final UserRepository userRepository;
     private final PropertyService propertyService;
 
+
     @Transactional
-    public void toggleWishlist(Long userId, Long propertyId) {
-        propertyRepository.findById(propertyId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Property", "id", propertyId));
+    public boolean toggleWishlist(Long userId, Long propertyId) {
+        Property property = propertyRepository.findById(propertyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Property", "id", propertyId));
 
-        if (wishlistRepository.existsByUserIdAndPropertyId(userId, propertyId)) {
-            wishlistRepository.findByUserIdAndPropertyId(userId, propertyId)
-                    .ifPresent(wishlistRepository::delete);
-        } else {
-            User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new ResourceNotFoundException(
-                            "User", "id", userId));
-            Property property = propertyRepository.findById(propertyId)
-                    .orElseThrow();
-
-            wishlistRepository.save(Wishlist.builder()
-                    .user(user)
-                    .property(property)
-                    .build());
+        var existing = wishlistRepository.findByUserIdAndPropertyId(userId, propertyId);
+        if (existing.isPresent()) {
+            wishlistRepository.delete(existing.get());
+            return false;
         }
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+
+        wishlistRepository.save(Wishlist.builder().user(user).property(property).build());
+        return true;
     }
 
-    public PagedResponse<PropertyResponse> getUserWishlist(
-            Long userId, int page, int size) {
+    public PagedResponse<PropertyResponse> getUserWishlist(Long userId, int page, int size) {
+        Pageable pageable = PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 50));
+        Page<Wishlist> wishlists = wishlistRepository.findActiveByUserId(userId, pageable);
 
-        Pageable pageable = PageRequest.of(page, size);
-        Page<Wishlist> wishlists = wishlistRepository
-                .findByUserIdOrderByCreatedAtDesc(userId, pageable);
-
-        List<PropertyResponse> content = wishlists.getContent()
-                .stream()
+        List<PropertyResponse> content = wishlists.getContent().stream()
                 .map(w -> propertyService.mapToResponse(w.getProperty()))
                 .collect(Collectors.toList());
 
@@ -69,8 +67,12 @@ public class WishlistService {
                 .build();
     }
 
+
+    public List<Long> getWishlistedPropertyIds(Long userId) {
+        return wishlistRepository.findPropertyIdsByUserId(userId);
+    }
+
     public boolean isWishlisted(Long userId, Long propertyId) {
-        return wishlistRepository
-                .existsByUserIdAndPropertyId(userId, propertyId);
+        return wishlistRepository.existsByUserIdAndPropertyId(userId, propertyId);
     }
 }

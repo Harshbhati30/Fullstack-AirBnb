@@ -17,11 +17,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -36,28 +36,30 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider jwtTokenProvider;
 
-
     @Transactional
     public AuthResponse register(RegisterRequest request) {
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new BadRequestException(
-                    "Email already registered. Please login instead.");
+        String email = request.getEmail().trim().toLowerCase();
+
+        if (userRepository.existsByEmail(email)) {
+            throw new BadRequestException("Email already registered. Please login instead.");
         }
 
         Role userRole = roleRepository.findByName(RoleName.ROLE_USER)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Default role not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("Default role not found"));
+
+        Set<Role> roles = new HashSet<>();
+        roles.add(userRole);
 
         User user = User.builder()
                 .firstName(request.getFirstName())
                 .lastName(request.getLastName())
-                .email(request.getEmail())
+                .email(email)
                 .password(passwordEncoder.encode(request.getPassword()))
                 .phoneNumber(request.getPhoneNumber())
                 .provider("LOCAL")
                 .isActive(true)
                 .isEmailVerified(false)
-                .roles(Set.of(userRole))
+                .roles(roles)
                 .build();
 
         User savedUser = userRepository.save(user);
@@ -66,68 +68,87 @@ public class AuthService {
         return buildAuthResponse(savedUser);
     }
 
-
+    @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest request) {
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(
-                        request.getEmail(),
-                        request.getPassword()
-                )
-        );
+                        request.getEmail().trim().toLowerCase(), request.getPassword()));
 
-        UserPrincipal userPrincipal =
-                (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
 
-        User user = userRepository.findById(userPrincipal.getId())
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "User", "id", userPrincipal.getId()));
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", principal.getId()));
 
-        String accessToken  = jwtTokenProvider.generateAccessToken(authentication);
+        String accessToken = jwtTokenProvider.generateAccessToken(authentication);
         String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId());
 
         log.info("User logged in: {}", user.getEmail());
         return buildAuthResponse(user, accessToken, refreshToken);
     }
 
-
+    @Transactional(readOnly = true)
     public AuthResponse refreshToken(String refreshToken) {
-        if (!jwtTokenProvider.validateToken(refreshToken)) {
-            throw new BadRequestException(
-                    "Invalid or expired refresh token. Please login again.");
+
+        if (!jwtTokenProvider.validateToken(refreshToken)
+                || !jwtTokenProvider.isRefreshToken(refreshToken)) {
+            throw new BadRequestException("Invalid or expired refresh token. Please login again.");
         }
 
         Long userId = jwtTokenProvider.getUserIdFromToken(refreshToken);
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "User", "id", userId));
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+
+        if (!Boolean.TRUE.equals(user.getIsActive())) {
+            throw new BadRequestException("Your account has been deactivated. Contact support.");
+        }
 
         String roles = user.getRoles().stream()
                 .map(role -> role.getName().name())
                 .collect(Collectors.joining(","));
 
         String newAccessToken = jwtTokenProvider.generateAccessTokenFromUserId(
-                user.getId(), user.getEmail(), roles
-        );
+                user.getId(), user.getEmail(), roles);
 
         return buildAuthResponse(user, newAccessToken, refreshToken);
     }
 
+
+    @Transactional
+    public AuthResponse becomeHost(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+
+        boolean alreadyHost = user.getRoles().stream()
+                .anyMatch(r -> r.getName() == RoleName.ROLE_HOST);
+        if (alreadyHost) {
+            throw new BadRequestException("You are already a host");
+        }
+
+        Role hostRole = roleRepository.findByName(RoleName.ROLE_HOST)
+                .orElseThrow(() -> new ResourceNotFoundException("Host role not found"));
+
+        Set<Role> roles = new HashSet<>(user.getRoles());
+        roles.add(hostRole);
+        user.setRoles(roles);
+        userRepository.save(user);
+
+        log.info("User {} became a host", user.getEmail());
+        return buildAuthResponse(user);
+    }
 
     private AuthResponse buildAuthResponse(User user) {
         String roles = user.getRoles().stream()
                 .map(role -> role.getName().name())
                 .collect(Collectors.joining(","));
 
-        String accessToken  = jwtTokenProvider.generateAccessTokenFromUserId(
+        String accessToken = jwtTokenProvider.generateAccessTokenFromUserId(
                 user.getId(), user.getEmail(), roles);
         String refreshToken = jwtTokenProvider.generateRefreshToken(user.getId());
 
         return buildAuthResponse(user, accessToken, refreshToken);
     }
 
-    private AuthResponse buildAuthResponse(User user,
-                                           String accessToken,
-                                           String refreshToken) {
+    private AuthResponse buildAuthResponse(User user, String accessToken, String refreshToken) {
         Set<String> roles = user.getRoles().stream()
                 .map(role -> role.getName().name())
                 .collect(Collectors.toSet());
